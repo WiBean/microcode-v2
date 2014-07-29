@@ -17,23 +17,24 @@
 // some utility functions
 #include "Utilities.h"
 
-#define PUMP_PIN D5
+#define PUMP_PIN D3
 #define PUMP_ON_VALUE HIGH
 #define PUMP_OFF_VALUE LOW
 
-#define VALVE_PIN D4
-#define VALVE_BREW_VALUE LOW
-#define VALVE_NOBREW_VALUE HIGH
+#define VALVE_PIN D2
+#define VALVE_BREW_VALUE HIGH
+#define VALVE_NOBREW_VALUE LOW
 
-#define HEATING_RELAY_PIN D2
+#define HEATING_RELAY_PIN D0
 #define HEATING_RELAY_ON_VALUE LOW
 #define HEATING_RELAY_OFF_VALUE HIGH
 
-#define HEATING_THYRISTOR_PIN D3
+#define HEATING_THYRISTOR_PIN D1
 #define HEATING_THYRISTOR_ON_VALUE HIGH
 #define HEATING_THYRISTOR_OFF_VALUE LOW
 
-#define THERMISTOR_PIN A0
+#define THERMISTOR_PIN_HEAD A0
+#define THERMISTOR_PIN_AMBIENT A1
 
 #define PUMP_START_DELAY 100; //100ms delay
 
@@ -42,10 +43,12 @@ HeatingSM heater;
 // hardware timers
 IntervalTimer heatingTimer;
 IntervalTimer pumpTimer;
+IntervalTimer temperatureTimer;
 // Thermistor LUT
 Thermistor thermistor;
 // the way spark works, we can only return data to the user via the Spark.variable command
-double temperatureInCelsius = 0;
+double temperatureInCelsius_head = 0;
+double temperatureInCelsius_ambient = 0;
 // pump controller
 PumpProgram<5> pump;
 
@@ -57,7 +60,8 @@ void setup() {
     Spark.function("pumpControl", pumpCommand);
 
     // I would much rather this be a float, but they only offer DOUBLEs
-    Spark.variable("headTemp", &temperatureInCelsius,DOUBLE);
+    Spark.variable("headTemp", &temperatureInCelsius_head,DOUBLE);
+    Spark.variable("ambientTemp", &temperatureInCelsius_ambient,DOUBLE);
 
     configurePins();
     // setup hardware timer which controls heating loop and pump loop
@@ -67,7 +71,6 @@ void setup() {
 }
 
 void loop() {
-    temperatureInCelsius = thermistor.getTemperature( analogRead(THERMISTOR_PIN) );
 }
 
 
@@ -77,16 +80,27 @@ void configurePins() {
    pinMode(VALVE_PIN, OUTPUT);
    pinMode(HEATING_RELAY_PIN, OUTPUT);
    pinMode(HEATING_THYRISTOR_PIN, OUTPUT);
-   pinMode(THERMISTOR_PIN,INPUT);
+   pinMode(THERMISTOR_PIN_HEAD,INPUT);
+   pinMode(THERMISTOR_PIN_AMBIENT, INPUT);
+
+   // turn everything off
+   digitalWrite(HEATING_RELAY_PIN, HEATING_RELAY_OFF_VALUE);
+   digitalWrite(HEATING_THYRISTOR_PIN, HEATING_THYRISTOR_OFF_VALUE);
+   digitalWrite(PUMP_PIN, PUMP_OFF_VALUE);
+   digitalWrite(VALVE_PIN, VALVE_NOBREW_VALUE);
 }
 void setupTimers() {
     // called every 50ms
-    heatingTimer.begin(heatingLoop, 1000, hmSec);
+    heater.setCycleLengthInMilliseconds(50);
+    heater.setGoalTemperature(95); // hard coded init for now
+    heatingTimer.begin(heatingLoop, 100, hmSec);
     // called every 100ms
-    pumpTimer.begin(pumpLoop, 2000, hmSec);
+    pumpTimer.begin(pumpLoop, 200, hmSec);
 }
 
 void heatingLoop() {
+    temperatureUpdate();
+    heater.updateCurrentTemp(temperatureInCelsius_head);
     // check the relay
     if( heater.runRelay() ) {
         digitalWrite(HEATING_RELAY_PIN, HEATING_RELAY_ON_VALUE);
@@ -107,22 +121,39 @@ void heatingLoop() {
 void pumpLoop() {
   if( pump.isPumpingAt(millis()) ) {
     digitalWrite(PUMP_PIN, PUMP_ON_VALUE);
-    digitalWrite(VALVE_PIN, VALVE_BREW_VALUE);
   }
   else {
     digitalWrite(PUMP_PIN, PUMP_OFF_VALUE);
+  }
+  // only open the valve once at the beginning and close once at the end
+  if( pump.isValveOpenAt(millis()) ) {
+    digitalWrite(VALVE_PIN, VALVE_BREW_VALUE);
+  }
+  else {
     digitalWrite(VALVE_PIN, VALVE_NOBREW_VALUE);
   }
 }
 
+void temperatureUpdate() {
+  delay(3);
+  temperatureInCelsius_head = thermistor.getTemperature( analogRead(THERMISTOR_PIN_HEAD) );
+  delay(3);
+  temperatureInCelsius_ambient = thermistor.getTemperature( analogRead(THERMISTOR_PIN_AMBIENT) );
+}
+
 int heatTarget(String command) {
-    Serial.println("heatTarget!");
+  int targetAsInt = command.toInt();
+  if( heater.setGoalTemperature(targetAsInt) ) {
     return 1;
+  }
+  else {
+    return -1;
+  }
 }
 
 int heatToggle(String command) {
-    Serial.println("heatToggle!");
-    return 1;
+  heater.enableHeating( command.charAt(0) == '1' );
+  return 1;
 }
 
 int pumpCommand(String command) {
@@ -144,12 +175,20 @@ int pumpCommand(String command) {
   while( (numLoop < pump.PUMP_STEPS) ) {
     int value;
     curChar = takeNext(command, curChar, value) + 1;
+#ifdef SERIAL_DEBUG
+    Serial.print("curChar: ");
+    Serial.println(curChar);
+#endif
+    if( curChar == 0 ) { break; }
     onForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
     // 0 because we added one
-    if( curChar == 0 ) { break; }
     curChar = takeNext(command, curChar, value) + 1;
-    offForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
+#ifdef SERIAL_DEBUG
+    Serial.print("curChar: ");
+    Serial.println(curChar);
+#endif
     if( curChar == 0 ) { break; }
+    offForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
     ++numLoop;
   }
   // transfer our values from onFor/offFor, into onTimes and offTimes;
@@ -183,6 +222,7 @@ int takeNext(String const& command, uint16_t const start, int & outValue)
   int outMark = command.indexOf(',',start);
   if( outMark == -1 ) {
     outValue = command.substring(start).toInt();
+    return command.length(); // indicate that the value is good, but we're at the end
   }
   else {
     outValue = command.substring(start,outMark).toInt();

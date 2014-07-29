@@ -67,6 +67,11 @@ public:
     return false;
   }
 
+  bool isValveOpenAt(uint32_t currentTimeInMillis) {
+    return ( (currentTimeInMillis >= mOnTimes[0]) &&
+              (currentTimeInMillis <= mOffTimes[PUMP_STEPS-1]) );
+  }
+
 private:
   // the Spark millis() function is a 32-bit unsigned counter
   // stored as when to turn on and when to turn off based on an
