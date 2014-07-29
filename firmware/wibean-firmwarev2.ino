@@ -53,7 +53,9 @@ double temperatureInCelsius_ambient = 0;
 PumpProgram<5> pump;
 
 void setup() {
+#ifdef SERIAL_DEBUG
     Serial.begin(9600);
+#endif SERIAL_DEBUG
     //Register our Spark function here
     Spark.function("heatTarget", heatTarget);
     Spark.function("heatToggle", heatToggle);
@@ -66,8 +68,6 @@ void setup() {
     configurePins();
     // setup hardware timer which controls heating loop and pump loop
     setupTimers();
-
-    Serial.println("Hello WiBean!");
 }
 
 void loop() {
