@@ -43,7 +43,6 @@ HeatingSM heater;
 // hardware timers
 IntervalTimer heatingTimer;
 IntervalTimer pumpTimer;
-IntervalTimer temperatureTimer;
 // Thermistor LUT
 Thermistor thermistor;
 // the way spark works, we can only return data to the user via the Spark.variable command
