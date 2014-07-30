@@ -159,7 +159,9 @@ int pumpCommand(String command) {
   // pump commands come in CSV, e.g. 32,44,33,22,0,0,0,33
   // as onFor,offFor,onFor,offFor.... up to the max limit set by PumpControl
   // and they come in with units of 100ms per unit.
+#ifdef SERIAL_DEBUG
   Serial.println("pumpCommand!");
+#endif
   // did they send any parameters?
   if(command.length() == 0) {
     return -1;
