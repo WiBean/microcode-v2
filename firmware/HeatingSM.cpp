@@ -59,6 +59,12 @@ void HeatingSM::enableHeating(bool enable)
   }
 }
 
+
+bool HeatingSM::isHeating()
+{
+  return (mState != HIBERNATE);
+}
+
 bool HeatingSM::setGoalTemperature(float temperatureInCelsius)
 {
   if( temperatureInCelsius > MAX_GOAL_TEMP ) {
@@ -200,6 +206,10 @@ bool HeatingSM::updateCurrentTemp(float temperatureInCelsius)
   case HIBERNATE:
     mThyristorOn = false;
     // do nothing
+    break;
+  default:
+    // we shouldn't be here
+    mState = HIBERNATE;
     break;
   }
   return true;

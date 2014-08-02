@@ -1,6 +1,7 @@
 // This #include statement was automatically added by the Spark IDE.
 #include "SortedLookupTable.h"
 
+#include <limits>
 
 // this is used for access to hardware timers
 //#include "SparkIntervalTimer/SparkIntervalTimer.h"
@@ -50,15 +51,21 @@ double temperatureInCelsius_head = 0;
 double temperatureInCelsius_ambient = 0;
 // pump controller
 PumpProgram<5> pump;
+// variables which get triggered by the hardware timers
+volatile bool runHeating = false;
+volatile bool runPump = false;
+
+const uint32_t INACTIVITY_SHUTOFF_IN_MILLISECONDS = 45*60*1000; // 45 minutes
+uint32_t time_last_command = 0;
+uint16_t alarm_waketime_minutes = std::numeric_limits<uint16_t>::max();
 
 void setup() {
-#ifdef SERIAL_DEBUG
     Serial.begin(9600);
-#endif SERIAL_DEBUG
     //Register our Spark function here
     Spark.function("heatTarget", heatTarget);
     Spark.function("heatToggle", heatToggle);
     Spark.function("pumpControl", pumpCommand);
+    Spark.function("toggleAlarm", alarmCommand);
 
     // I would much rather this be a float, but they only offer DOUBLEs
     Spark.variable("headTemp", &temperatureInCelsius_head,DOUBLE);
@@ -70,6 +77,37 @@ void setup() {
 }
 
 void loop() {
+  if( runHeating ) {
+    heatingLoop();
+    runHeating = false;
+  }
+  if( runPump ) {
+    pumpLoop();
+    runPump = false;
+  }
+  // monitor the dead-mans heating cutoff
+  uint32_t currentTime = millis();
+  if( heater.isHeating()) {
+    uint32_t deltaTime = 0;
+    if( currentTime < time_last_command ) {
+      // NOTE: for the math below, we will always reach the cutoff time before this
+      // would overflow (because the cutoff interval itself is a uint32_t)
+      deltaTime = std::numeric_limits<uint32_t>::max() - time_last_command + currentTime;
+    }
+    else {
+      deltaTime = currentTime - time_last_command;
+    }
+    if( deltaTime >= INACTIVITY_SHUTOFF_IN_MILLISECONDS) {
+      heater.enableHeating(false);
+    }
+  }
+  // monitor the wake alarm
+  // to disable wake-alarm simply set alarm to value > minutesInADay
+  uint16_t currentMinutes = Time.hour()*60 + Time.minute();
+  if( currentMinutes == alarm_waketime_minutes ) {
+    time_last_command = currentTime;
+    heater.enableHeating(true);
+  }
 }
 
 
@@ -92,10 +130,24 @@ void setupTimers() {
     // called every 50ms
     heater.setCycleLengthInMilliseconds(50);
     heater.setGoalTemperature(95); // hard coded init for now
-    heatingTimer.begin(heatingLoop, 100, hmSec);
+    heatingTimer.begin(interruptHeat, 100, hmSec);
     // called every 100ms
-    pumpTimer.begin(pumpLoop, 200, hmSec);
+    pumpTimer.begin(interruptPump, 200, hmSec);
 }
+
+
+// the hardware timers are used this way as it is apparent that functions
+// triggered by the hardware timers must use volatile variables (which don't
+// play nicely with some of the spark.io library functions) and also you cannot
+// use delay in these functions, and I don't want to guarantee that in the whole
+// execution chain.
+void interruptHeat() {
+  runHeating = true;
+}
+void interruptPump() {
+  runPump = true;
+}
+
 
 void heatingLoop() {
     temperatureUpdate();
@@ -116,6 +168,12 @@ void heatingLoop() {
     }
 
 }
+void temperatureUpdate() {
+  temperatureInCelsius_head = thermistor.getTemperature( analogRead(THERMISTOR_PIN_HEAD) );
+  delay(1); // wait 1 ms for ADC to recharge
+  temperatureInCelsius_ambient = thermistor.getTemperature( analogRead(THERMISTOR_PIN_AMBIENT) );
+}
+
 
 void pumpLoop() {
   if( pump.isPumpingAt(millis()) ) {
@@ -133,12 +191,6 @@ void pumpLoop() {
   }
 }
 
-void temperatureUpdate() {
-  delay(3);
-  temperatureInCelsius_head = thermistor.getTemperature( analogRead(THERMISTOR_PIN_HEAD) );
-  delay(3);
-  temperatureInCelsius_ambient = thermistor.getTemperature( analogRead(THERMISTOR_PIN_AMBIENT) );
-}
 
 int heatTarget(String command) {
   int targetAsInt = command.toInt();
@@ -230,3 +282,18 @@ int takeNext(String const& command, uint16_t const start, int & outValue)
   }
   return outMark;
 };
+
+
+int alarmCommand(String command)
+{
+  // alarm is set as minutesAfterStartOfDay.  To disable, simply set a value
+  // greater than number of minutes in day
+  int minutesAfterDayStart = command.toInt();
+  if( (minutesAfterDayStart < 0) || (minutesAfterDayStart > std::numeric_limits<uint16_t>::max()) ) {
+    return -1;
+  }
+  else {
+    alarm_waketime_minutes = minutesAfterDayStart;
+    return 1;
+  }
+}

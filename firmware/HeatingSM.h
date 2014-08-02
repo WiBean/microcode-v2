@@ -33,6 +33,7 @@ public:
 
     // true enables the heat loop, false goes into hibernation until awakened
     void enableHeating(bool enable);
+    bool isHeating();
     // update the goal temperature and check validity
     bool updateGoalTemperatureInCelsius(float temperatureInCelsius);
     // force the user to set cycleLength in ms even though it's stored interally as float
