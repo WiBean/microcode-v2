@@ -48,7 +48,7 @@ protected:
         // if the value is at or above the 0 index value, our lowValue check will catch it
         uint16_t searchIndexMin = 1;
         uint16_t searchIndexMax = getArrSize()-1;
-        while( searchIndexMax > searchIndexMin ) {
+        while( searchIndexMax > (searchIndexMin+1) ) {
             // calculate the midpoint to search next
             // NOTE: this way of calculating the mid ensures our midIndex will never == INPUT_SIZE-1
             // this is important because it ensures out index+1 check below will never index OOB on the high side

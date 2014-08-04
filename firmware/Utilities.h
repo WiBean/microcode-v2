@@ -4,6 +4,8 @@
  ************
  */
 
+ #include "AveragingFloatBuffer.h"
+
 template <typename T>
 void printArray(uint16_t numel, T const*const array)
 {

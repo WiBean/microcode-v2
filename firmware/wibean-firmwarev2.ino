@@ -49,6 +49,8 @@ Thermistor thermistor;
 // the way spark works, we can only return data to the user via the Spark.variable command
 double temperatureInCelsius_head = 0;
 double temperatureInCelsius_ambient = 0;
+AveragingFloatBuffer<10> headTemperatureHistory;
+AveragingFloatBuffer<10> ambientTemperatureHistory;
 // pump controller
 PumpProgram<5> pump;
 // variables which get triggered by the hardware timers
@@ -169,9 +171,12 @@ void heatingLoop() {
 
 }
 void temperatureUpdate() {
-  temperatureInCelsius_head = thermistor.getTemperature( analogRead(THERMISTOR_PIN_HEAD) );
-  delay(1); // wait 1 ms for ADC to recharge
-  temperatureInCelsius_ambient = thermistor.getTemperature( analogRead(THERMISTOR_PIN_AMBIENT) );
+  delay(2); // wait 2 ms for ADC to recharge
+  headTemperatureHistory.add(thermistor.getTemperature( analogRead(THERMISTOR_PIN_HEAD) ));
+  temperatureInCelsius_head = headTemperatureHistory.average();
+  delay(2); // wait 2 ms for ADC to recharge
+  ambientTemperatureHistory.add(thermistor.getTemperature( analogRead(THERMISTOR_PIN_AMBIENT) ));
+  temperatureInCelsius_ambient = ambientTemperatureHistory.average();
 }
 
 
