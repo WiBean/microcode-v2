@@ -9,14 +9,16 @@
 
 class HeatingSM {
 
-private:
+public:
   enum State {
-      DETERMINE_STATE,
-      HEATING_RELAY,
-      HEATING_PULSE,
-      COOLING,
-      HIBERNATE
+    HIBERNATE,
+    DETERMINE_STATE,
+    HEATING_RELAY,
+    HEATING_PULSE,
+    COOLING,
+    PUMPING
   };
+private:
   static float const RELAY_CUTOFF_OFFSET_CELSIUS;
   static float const RELAY_HYSTERESIS_MARGIN_CELSIUS;
   static float const MAX_GOAL_TEMP;
@@ -34,6 +36,7 @@ public:
     // true enables the heat loop, false goes into hibernation until awakened
     void enableHeating(bool enable);
     bool isHeating();
+    State getState();
     // update the goal temperature and check validity
     bool updateGoalTemperatureInCelsius(float temperatureInCelsius);
     // force the user to set cycleLength in ms even though it's stored interally as float
@@ -48,6 +51,8 @@ public:
     bool runRelay();
     // return true if heating cycle should activate thyristor, also decrements cyclesToPulse counter (assumes caller takes action!)
     bool runThyristor();
+    // inform the state manager that we are pumping
+    void informOfPumping(bool pumpingNow);
 
 private:
     State mState;

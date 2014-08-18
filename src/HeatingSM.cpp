@@ -34,17 +34,17 @@ bool HeatingSM::setCycleLengthInMilliseconds(uint16_t lengthInMs)
   mCycleLengthInMilliseconds = static_cast<float>(lengthInMs);
 
   mThyristorHeatingBlinkWidthInCycles = std::max(
-          ceil(THYRISTOR_HEATING_BLINK_WIDTH_IN_MS/mCycleLengthInMilliseconds),
-          1.);
+          ceilf(THYRISTOR_HEATING_BLINK_WIDTH_IN_MS/mCycleLengthInMilliseconds),
+          1.f);
   mThyristorHeatingBlinkOffWidthInCycles = std::max(
-          ceil(THYRISTOR_HEATING_BLINK_OFF_WIDTH_IN_MS/mCycleLengthInMilliseconds),
-          1.);
+          ceilf(THYRISTOR_HEATING_BLINK_OFF_WIDTH_IN_MS/mCycleLengthInMilliseconds),
+          1.f);
   mCoolingBlinkWidthInCycles = std::max(
-          ceil(COOLING_BLINK_WIDTH_IN_MS/mCycleLengthInMilliseconds),
-          1.);
+          ceilf(COOLING_BLINK_WIDTH_IN_MS/mCycleLengthInMilliseconds),
+          1.f);
   mCoolingDwellWidthInCycles = std::max(
-          ceil(COOLING_DWELL_WIDTH_IN_MS/mCycleLengthInMilliseconds),
-          1.);
+          ceilf(COOLING_DWELL_WIDTH_IN_MS/mCycleLengthInMilliseconds),
+          1.f);
   return true;
 };
 
@@ -83,7 +83,7 @@ bool HeatingSM::setGoalTemperature(float temperatureInCelsius)
 
 bool HeatingSM::runRelay()
 {
-  return (mState == HEATING_RELAY);
+  return ((mState == HEATING_RELAY) || (mState == PUMPING));
 };
 
 
@@ -207,6 +207,10 @@ bool HeatingSM::updateCurrentTemp(float temperatureInCelsius)
     mThyristorOn = false;
     // do nothing
     break;
+  case PUMPING:
+    // the relay will handle heating now
+    mThyristorOn = false;
+    break;
   default:
     // we shouldn't be here
     mState = HIBERNATE;
@@ -218,8 +222,27 @@ bool HeatingSM::updateCurrentTemp(float temperatureInCelsius)
 
 uint16_t HeatingSM::computeThyristorDwellTimeInCycles()
 {
-  // for now, use a fixed 400ms
-  return std::max(
-          ceil(500.f / mCycleLengthInMilliseconds),
-          1.);
-}
+	// for now, use a fixed 550ms
+	return static_cast<uint16_t>(
+				std::max(
+				ceilf(550.f / mCycleLengthInMilliseconds),
+				1.f)
+			);
+};
+
+
+void HeatingSM::informOfPumping(bool pumpingNow)
+{
+  if( mState != HIBERNATE ) {
+    if( pumpingNow ) {
+      mState = PUMPING;
+    }
+    else {
+      mState = DETERMINE_STATE;
+    }
+  }
+};
+
+HeatingSM::State HeatingSM::getState() {
+  return mState;
+};

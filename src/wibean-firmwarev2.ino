@@ -17,6 +17,8 @@
 #include "PumpProgram.h"
 // some utility functions
 #include "Utilities.h"
+// an N-point moving average filter on a float value
+#include "AveragingFloatBuffer.h"
 
 #define PUMP_PIN D3
 #define PUMP_ON_VALUE HIGH
@@ -44,6 +46,7 @@ HeatingSM heater;
 // hardware timers
 IntervalTimer heatingTimer;
 IntervalTimer pumpTimer;
+IntervalTimer statusTimer;
 // Thermistor LUT
 Thermistor thermistor;
 // the way spark works, we can only return data to the user via the Spark.variable command
@@ -56,11 +59,19 @@ PumpProgram<5> pump;
 // variables which get triggered by the hardware timers
 volatile bool runHeating = false;
 volatile bool runPump = false;
+volatile bool runStatus = false;
 
+const uint16_t STATUS_AS_JSON_LENGTH = 128;
+char statusAsJson[STATUS_AS_JSON_LENGTH];
+
+// Alarm functions
 const uint32_t INACTIVITY_SHUTOFF_IN_MILLISECONDS = 45*60*1000; // 45 minutes
+const uint16_t MINUTES_IN_DAY = 60*24;
 uint32_t time_last_command = 0;
 uint16_t alarm_waketime_minutes = std::numeric_limits<uint16_t>::max();
 
+
+// BEGIN CODE
 void setup() {
     Serial.begin(9600);
     //Register our Spark function here
@@ -73,9 +84,39 @@ void setup() {
     Spark.variable("headTemp", &temperatureInCelsius_head,DOUBLE);
     Spark.variable("ambientTemp", &temperatureInCelsius_ambient,DOUBLE);
 
+    // setup the c-str to initially be empty
+    sprintf(statusAsJson,"init");
+    Spark.variable("status", statusAsJson, STRING);
+
     configurePins();
     // setup hardware timer which controls heating loop and pump loop
     setupTimers();
+}
+void configurePins() {
+    // Configure OUTPUTS
+   pinMode(PUMP_PIN, OUTPUT);
+   pinMode(VALVE_PIN, OUTPUT);
+   pinMode(HEATING_RELAY_PIN, OUTPUT);
+   pinMode(HEATING_THYRISTOR_PIN, OUTPUT);
+   // Configure INPUTS
+   pinMode(THERMISTOR_PIN_HEAD,INPUT);
+   pinMode(THERMISTOR_PIN_AMBIENT, INPUT);
+
+   // turn everything off
+   digitalWrite(HEATING_RELAY_PIN, HEATING_RELAY_OFF_VALUE);
+   digitalWrite(HEATING_THYRISTOR_PIN, HEATING_THYRISTOR_OFF_VALUE);
+   digitalWrite(PUMP_PIN, PUMP_OFF_VALUE);
+   digitalWrite(VALVE_PIN, VALVE_NOBREW_VALUE);
+}
+void setupTimers() {
+    // called every 50ms
+    heater.setCycleLengthInMilliseconds(50);
+    heater.setGoalTemperature(95); // hard coded init for now
+    heatingTimer.begin(interruptHeat, 100, hmSec);
+    // called every 100ms
+    pumpTimer.begin(interruptPump, 200, hmSec);
+    // called every 1000ms
+    statusTimer.begin(interruptStatus, 2000, hmSec);
 }
 
 void loop() {
@@ -86,6 +127,10 @@ void loop() {
   if( runPump ) {
     pumpLoop();
     runPump = false;
+  }
+  if( runStatus ) {
+    updateStatusString();
+    runStatus = false;
   }
   // monitor the dead-mans heating cutoff
   uint32_t currentTime = millis();
@@ -113,31 +158,6 @@ void loop() {
 }
 
 
-void configurePins() {
-    // Configure the pins to be outputs
-   pinMode(PUMP_PIN, OUTPUT);
-   pinMode(VALVE_PIN, OUTPUT);
-   pinMode(HEATING_RELAY_PIN, OUTPUT);
-   pinMode(HEATING_THYRISTOR_PIN, OUTPUT);
-   pinMode(THERMISTOR_PIN_HEAD,INPUT);
-   pinMode(THERMISTOR_PIN_AMBIENT, INPUT);
-
-   // turn everything off
-   digitalWrite(HEATING_RELAY_PIN, HEATING_RELAY_OFF_VALUE);
-   digitalWrite(HEATING_THYRISTOR_PIN, HEATING_THYRISTOR_OFF_VALUE);
-   digitalWrite(PUMP_PIN, PUMP_OFF_VALUE);
-   digitalWrite(VALVE_PIN, VALVE_NOBREW_VALUE);
-}
-void setupTimers() {
-    // called every 50ms
-    heater.setCycleLengthInMilliseconds(50);
-    heater.setGoalTemperature(95); // hard coded init for now
-    heatingTimer.begin(interruptHeat, 100, hmSec);
-    // called every 100ms
-    pumpTimer.begin(interruptPump, 200, hmSec);
-}
-
-
 // the hardware timers are used this way as it is apparent that functions
 // triggered by the hardware timers must use volatile variables (which don't
 // play nicely with some of the spark.io library functions) and also you cannot
@@ -149,13 +169,17 @@ void interruptHeat() {
 void interruptPump() {
   runPump = true;
 }
-
+void interruptStatus() {
+  runStatus = true;
+}
 
 void heatingLoop() {
     temperatureUpdate();
     heater.updateCurrentTemp(temperatureInCelsius_head);
+    // should we be using the relay OR are we brewing coffee?
+    bool runRelay = (heater.runRelay() || pump.isValveOpenAt(millis()));
     // check the relay
-    if( heater.runRelay() ) {
+    if( runRelay ) {
         digitalWrite(HEATING_RELAY_PIN, HEATING_RELAY_ON_VALUE);
     }
     else {
@@ -208,8 +232,13 @@ int heatTarget(String command) {
 }
 
 int heatToggle(String command) {
-  heater.enableHeating( command.charAt(0) == '1' );
-  return 1;
+  if( command.length() >= 1 ) {
+    heater.enableHeating( command.charAt(0) == '1' );
+    return 1;
+  }
+  else {
+    return -1;
+  }
 }
 
 int pumpCommand(String command) {
@@ -223,16 +252,16 @@ int pumpCommand(String command) {
   if(command.length() == 0) {
     return -1;
   }
-  int curChar = 0;
+  uint16_t curChar = 0;
   uint16_t numLoop = 0;
   decltype(pump)::PUMP_TIME_TYPE onForMillis[pump.PUMP_STEPS];
   decltype(pump)::PUMP_TIME_TYPE offForMillis[pump.PUMP_STEPS];
-  memset(onForMillis, 0, sizeof(int)*pump.PUMP_STEPS);
-  memset(offForMillis, 0, sizeof(int)*pump.PUMP_STEPS);
+  memset(onForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
+  memset(offForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
 
   while( (numLoop < pump.PUMP_STEPS) ) {
     int value;
-    curChar = takeNext(command, curChar, value) + 1;
+    curChar = wibean::utils::takeNext(command, curChar, value) + 1;
 #ifdef SERIAL_DEBUG
     Serial.print("curChar: ");
     Serial.println(curChar);
@@ -240,7 +269,7 @@ int pumpCommand(String command) {
     if( curChar == 0 ) { break; }
     onForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
     // 0 because we added one
-    curChar = takeNext(command, curChar, value) + 1;
+    curChar = wibean::utils::takeNext(command, curChar, value) + 1;
 #ifdef SERIAL_DEBUG
     Serial.print("curChar: ");
     Serial.println(curChar);
@@ -259,33 +288,13 @@ int pumpCommand(String command) {
     offTimes[k] = onTimes[k] + onForMillis[k];
   }
 //#ifdef DEBUG_OUTPUT
-  printArray(pump.PUMP_STEPS, onForMillis);
-  printArray(pump.PUMP_STEPS, offForMillis);
-  printArray(pump.PUMP_STEPS, onTimes);
-  printArray(pump.PUMP_STEPS, offTimes);
+  wibean::utils::printArray(pump.PUMP_STEPS, onForMillis);
+  wibean::utils::printArray(pump.PUMP_STEPS, offForMillis);
+  wibean::utils::printArray(pump.PUMP_STEPS, onTimes);
+  wibean::utils::printArray(pump.PUMP_STEPS, offTimes);
 //#endif
   pump.setProgram(pump.PUMP_STEPS, onTimes, offTimes);
   return 1;
-};
-
-// returns the value taken off the string, as well as the next position
-// returns -1 if there is no next position
-int takeNext(String const& command, uint16_t const start, int & outValue)
-{
-  // check for 1-before the last character, in case the last character
-  // is a ',' we can ignore it
-  if( start >= command.length()-1 ) {
-    return -1;
-  }
-  int outMark = command.indexOf(',',start);
-  if( outMark == -1 ) {
-    outValue = command.substring(start).toInt();
-    return command.length(); // indicate that the value is good, but we're at the end
-  }
-  else {
-    outValue = command.substring(start,outMark).toInt();
-  }
-  return outMark;
 };
 
 
@@ -302,3 +311,30 @@ int alarmCommand(String command)
     return 1;
   }
 }
+
+
+void updateStatusString() {
+  // include a global declaration so that the String(value, BASE) constructor works correctly
+  unsigned char DEC_BASE = static_cast<unsigned char>(DEC);
+  String tempBuilder = "";
+  int tempValue = 0;
+  // status string is json with following fields
+  tempBuilder = "{";
+  // is the alarm active
+  tempBuilder += "\"ala\": " + wibean::utils::boolToString(alarm_waketime_minutes < MINUTES_IN_DAY) + ",";
+  // when is the alarm set for
+  tempValue = alarm_waketime_minutes;
+  tempBuilder += "\"alt\": " + String(tempValue,DEC_BASE) + ",";
+  // is the machine brewing right now?;
+  tempBuilder += "\"b\": " + wibean::utils::boolToString(pump.isValveOpenAt(millis())) + ",";
+  // is the machine heating right now?
+  tempBuilder += "\"h\": " + String(heater.getState(),DEC_BASE) + ",";
+  // what is the head temp right now?
+  tempBuilder += "\"t_h\": " + wibean::utils::floatToString(temperatureInCelsius_head) + ",";
+  // what is the ambient temp right now?
+  tempBuilder += "\"t_a\": " + wibean::utils::floatToString(temperatureInCelsius_ambient) + "";
+  // end JSON
+  tempBuilder += "}";
+
+  tempBuilder.toCharArray(statusAsJson,STATUS_AS_JSON_LENGTH);
+};

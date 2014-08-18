@@ -26,7 +26,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #include "application.h"
 
 
-enum {uSec, hmSec};			// microseconds or half-milliseconds
+enum TimeScale { uSec, hmSec };			// microseconds or half-milliseconds
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,14 +55,14 @@ class IntervalTimer {
     const uint16_t MAX_PERIOD = UINT16_MAX;		// 1-65535 us
 	
     static bool SIT_used[NUM_SIT];
-    bool allocate_SIT(uint16_t Period, bool scale, TIMid id);
-    void start_SIT(uint16_t Period, bool scale);
+	bool allocate_SIT(uint16_t Period, TimeScale scale, TIMid id);
+	void start_SIT(uint16_t Period, TimeScale scale);
     void stop_SIT();
     bool status;
     uint8_t SIT_id;
  	ISRcallback myISRcallback;
 	
-    bool beginCycles(void (*isrCallback)(), uint16_t Period, bool scale, TIMid id);
+	bool beginCycles(void(*isrCallback)(), uint16_t Period, TimeScale scale, TIMid id);
 	
   public:
     IntervalTimer() { 
@@ -73,13 +73,13 @@ class IntervalTimer {
     }
     ~IntervalTimer() { end(); }
 	
-    bool begin(void (*isrCallback)(), uint16_t Period, bool scale) {
+	bool begin(void(*isrCallback)(), uint16_t Period, TimeScale scale) {
 		if (Period == 0 || Period > MAX_PERIOD)
 			return false;
 		return beginCycles(isrCallback, Period, scale, AUTO);
     }
 	
-    bool begin(void (*isrCallback)(), uint16_t Period, bool scale, TIMid id) {
+	bool begin(void(*isrCallback)(), uint16_t Period, TimeScale scale, TIMid id) {
 		if (Period == 0 || Period > MAX_PERIOD)
 			return false;
 		return beginCycles(isrCallback, Period, scale, id);
@@ -87,7 +87,7 @@ class IntervalTimer {
 	
     void end();
 	void interrupt_SIT(action ACT);
-	void resetPeriod_SIT(uint16_t newPeriod, bool scale);
+	void resetPeriod_SIT(uint16_t newPeriod, TimeScale scale);
 	int8_t isAllocated_SIT(void);
 	
     static ISRcallback SIT_CALLBACK[NUM_SIT];
