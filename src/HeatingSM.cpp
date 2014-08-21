@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
-
+    
 float const HeatingSM::RELAY_CUTOFF_OFFSET_CELSIUS = 15;
 float const HeatingSM::RELAY_HYSTERESIS_MARGIN_CELSIUS = 4;
 float const HeatingSM::MAX_GOAL_TEMP = 120;

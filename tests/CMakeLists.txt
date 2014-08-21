@@ -19,4 +19,15 @@ add_dependencies(test-sortedLookupTable googletest)
 target_link_libraries(test-sortedLookupTable gtest)
 target_link_libraries(test-sortedLookupTable utilities_lib)
 add_test(NAME test-sortedLookupTable COMMAND test-sortedLookupTable)
+
+add_executable(test-pumpProgram test_pumpProgram.cpp)
+add_dependencies(test-pumpProgram googletest)
+target_link_libraries(test-pumpProgram gtest)
+add_test(NAME test-pumpProgram COMMAND test-pumpProgram)
+
+add_executable(test-heatingSM test_heatingSM.cpp)
+add_dependencies(test-heatingSM googletest)
+target_link_libraries(test-heatingSM gtest)
+target_link_libraries(test-heatingSM heatingsm_lib)
+add_test(NAME test-heatingSM COMMAND test-heatingSM)
   

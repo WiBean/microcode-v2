@@ -18,12 +18,13 @@ public:
     COOLING,
     PUMPING
   };
-private:
+
   static float const RELAY_CUTOFF_OFFSET_CELSIUS;
   static float const RELAY_HYSTERESIS_MARGIN_CELSIUS;
   static float const MAX_GOAL_TEMP;
   static float const PULSE_HYSTERESIS_MARGIN_CELSIUS;
-
+  
+private:
   static uint16_t const THYRISTOR_HEATING_BLINK_WIDTH_IN_MS = 100;
   static uint16_t const THYRISTOR_HEATING_BLINK_OFF_WIDTH_IN_MS = 100;
   static uint16_t const COOLING_BLINK_WIDTH_IN_MS = 100;
