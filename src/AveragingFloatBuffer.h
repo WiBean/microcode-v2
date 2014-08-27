@@ -3,28 +3,40 @@
 /**
  * Created by John-Michael on 8/4/2014.
  */
-template <int N>
+template <uint16_t N>
 class AveragingFloatBuffer {
 
 public:
     constexpr static const float LENGTH_AS_FLOAT = static_cast<float>(N);
+    static const uint16_t LENGTH = N;
 private:
-    float mData[5] =  {0.f,0.f,0.f,0.f,0.f};
+    float * mData;
     int mInsertPointer = 0;
     float mSum = 0;
     float mAverage = 0;
 
 public:
+    AveragingFloatBuffer() {
+        mData = new float[N];
+        for(uint16_t k=0;k<N;++k) {
+            mData[k] = 0;
+        }
+    }
+    ~AveragingFloatBuffer() {
+        delete[] mData;
+    }
     void add(float val) {
         mSum -= mData[mInsertPointer];
         mData[mInsertPointer++] = val;
-        mInsertPointer = mInsertPointer % N;
+        mInsertPointer = mInsertPointer % LENGTH;
         mSum += val;
         mAverage = mSum / LENGTH_AS_FLOAT;
 
     };
-
-    float average() {
+    float average() const {
         return mAverage;
+    } ;
+    float const* getData() const {
+        return mData;
     };
 };

@@ -93,8 +93,10 @@ add_executable(dummy_main main.cpp)
 
 #setup the deps on the main
 target_link_libraries(dummy_main heatingsm_lib)
+target_link_libraries(dummy_main heatingsmpid_lib)
 target_link_libraries(dummy_main thermistor_lib)
 target_link_libraries(dummy_main utilities_lib)
+target_link_libraries(dummy_main pid_lib)
 #target_link_libraries(dummy_main sparkintervaltimer_lib)
 # Template classes don't get libs...
 # this includes: PumpProgram, SortedLookupTable, AveragingFloatBuffer

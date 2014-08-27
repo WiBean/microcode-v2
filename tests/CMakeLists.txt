@@ -30,4 +30,10 @@ add_dependencies(test-heatingSM googletest)
 target_link_libraries(test-heatingSM gtest)
 target_link_libraries(test-heatingSM heatingsm_lib)
 add_test(NAME test-heatingSM COMMAND test-heatingSM)
+
+add_executable(test-pid test_pid.cpp)
+add_dependencies(test-pid googletest)
+target_link_libraries(test-pid gtest)
+target_link_libraries(test-pid pid_lib)
+add_test(NAME test-pid COMMAND test-pid)
   

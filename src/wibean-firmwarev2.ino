@@ -1,21 +1,15 @@
-// This #include statement was automatically added by the Spark IDE.
-#include "SortedLookupTable.h"
-
 #include <limits>
-
-// *****
-// DEBUG
-//#define SERIAL_DEBUG
-// ******
 
 // this is used for access to hardware timers
 //#include "SparkIntervalTimer/SparkIntervalTimer.h"
 // for now, we have to put everything in one directory for the spark-cli
 // compile command to work
 #include "SparkIntervalTimer.h"
+#undef min
+#undef max
 
 // Heating controller as a state machine
-#include "HeatingSM.h"
+#include "HeatingSMPID.h"
 // Maintains Thermistor LUT
 #include "Thermistor.h"
 // Maintains Pump control state
@@ -24,6 +18,12 @@
 #include "Utilities.h"
 // an N-point moving average filter on a float value
 #include "AveragingFloatBuffer.h"
+
+// *****
+// DEBUG (LEAVE THIS BELOW THE OTHER INCLUDES)
+#define SERIAL_DEBUG
+//#define HEAD_TEMP_DEBUG
+// ******
 
 #define PUMP_PIN D3
 #define PUMP_ON_VALUE HIGH
@@ -44,14 +44,14 @@
 #define THERMISTOR_PIN_HEAD A0
 #define THERMISTOR_PIN_AMBIENT A1
 
-#define PUMP_START_DELAY 100; //100ms delay
-
-// heat controller state machine
-HeatingSM heater;
 // hardware timers
 IntervalTimer heatingTimer;
 IntervalTimer pumpTimer;
 IntervalTimer statusTimer;
+
+// heat controller state machine
+HeatingSMPID heater;
+
 // Thermistor LUT
 Thermistor thermistor;
 // the way spark works, we can only return data to the user via the Spark.variable command
@@ -59,10 +59,13 @@ double temperatureInCelsius_head = 0;
 double temperatureInCelsius_ambient = 0;
 AveragingFloatBuffer<10> headTemperatureHistory;
 AveragingFloatBuffer<10> ambientTemperatureHistory;
+
 // pump controller
 PumpProgram<5> pump;
+decltype(pump)::PUMP_TIME_TYPE const PUMP_START_DELAY_IN_MS = 100; //100ms delay
 // keep track of pumping state changes
 bool valveWasOpenLastCycle = false;
+
 // variables which get triggered by the hardware timers
 volatile bool runHeating = false;
 volatile bool runPump = false;
@@ -75,7 +78,10 @@ char statusAsJson[STATUS_AS_JSON_LENGTH];
 const uint32_t INACTIVITY_SHUTOFF_IN_MILLISECONDS = 45*60*1000; // 45 minutes
 const uint16_t MINUTES_IN_DAY = 60*24;
 uint32_t time_last_command = 0;
-uint16_t alarm_waketime_minutes = std::numeric_limits<uint16_t>::max();
+uint16_t alarm_waketime_minutes = (std::numeric_limits<uint16_t>::max)();
+
+// EEPROM addresses
+const uint16_t EEPROM_ADDRESS_TIMEZOME = 0;
 
 
 // BEGIN CODE
@@ -94,6 +100,12 @@ void setup() {
     String("init").toCharArray(statusAsJson,STATUS_AS_JSON_LENGTH);
     Spark.variable("status", statusAsJson, STRING);
 
+    // load up values from memory
+    int8_t tzOffset = getTzOffsetFromEeprom();
+    // bounds check
+    tzOffset = std::max(std::min(tzOffset,(int8_t)13), (int8_t)-12);
+    //Time.zone( tzOffset );
+    
     configurePins();
     // setup hardware timer which controls heating loop and pump loop
     setupTimers();
@@ -145,7 +157,7 @@ void loop() {
     if( currentTime < time_last_command ) {
       // NOTE: for the math below, we will always reach the cutoff time before this
       // would overflow (because the cutoff interval itself is a uint32_t)
-      deltaTime = std::numeric_limits<uint32_t>::max() - time_last_command + currentTime;
+      deltaTime = (std::numeric_limits<uint32_t>::max)() - time_last_command + currentTime;
     }
     else {
       deltaTime = currentTime - time_last_command;
@@ -156,7 +168,7 @@ void loop() {
   }
   // monitor the wake alarm
   // to disable wake-alarm simply set alarm to value > minutesInADay
-  uint16_t currentMinutes = Time.hour()*60 + Time.minute();
+  uint16_t const currentMinutes = Time.hour()*60 + Time.minute();
   if( currentMinutes == alarm_waketime_minutes ) {
     time_last_command = currentTime;
     heater.enableHeating(true);
@@ -200,12 +212,21 @@ void heatingLoop() {
 
 }
 void temperatureUpdate() {
-  delay(2); // wait 2 ms for ADC to recharge
-  headTemperatureHistory.add(thermistor.getTemperature( analogRead(THERMISTOR_PIN_HEAD) ));
-  temperatureInCelsius_head = headTemperatureHistory.average();
-  delay(2); // wait 2 ms for ADC to recharge
-  ambientTemperatureHistory.add(thermistor.getTemperature( analogRead(THERMISTOR_PIN_AMBIENT) ));
-  temperatureInCelsius_ambient = ambientTemperatureHistory.average();
+    delay(2); // wait 2 ms for ADC to recharge
+    auto const pinRead = analogRead(THERMISTOR_PIN_HEAD);
+    float const tempCalc = thermistor.getTemperature( pinRead );
+    headTemperatureHistory.add(tempCalc);
+    temperatureInCelsius_head = headTemperatureHistory.average();
+#if defined(SERIAL_DEBUG) && defined(HEAD_TEMP_DEBUG)
+    unsigned char const DEC_BASE = static_cast<unsigned char>(DEC);
+    Serial.println("tic_p: " + String(pinRead, DEC_BASE) + " tic_tc: " + String(tempCalc,1)
+    + " tic_h: " + String(temperatureInCelsius_head,1));
+    float const* data = headTemperatureHistory.getData();
+    wibean::utils::printArray<float>(headTemperatureHistory.LENGTH, data);
+#endif
+    delay(2); // wait 2 ms for ADC to recharge
+    ambientTemperatureHistory.add(thermistor.getTemperature( analogRead(THERMISTOR_PIN_AMBIENT) ));
+    temperatureInCelsius_ambient = ambientTemperatureHistory.average();
 }
 
 
@@ -240,7 +261,7 @@ void pumpLoop() {
 int heatTarget(String command) {
     int targetAsInt = command.toInt();
 #ifdef SERIAL_DEBUG
-    unsigned char DEC_BASE = static_cast<unsigned char>(DEC);
+    unsigned char const DEC_BASE = static_cast<unsigned char>(DEC);
     Serial.println("heatTarget: " + command + " conv: " + String(targetAsInt,DEC_BASE) );
 #endif
     if( heater.setGoalTemperature(targetAsInt) ) {
@@ -306,7 +327,7 @@ int pumpCommand(String command) {
   // transfer our values from onFor/offFor, into onTimes and offTimes;
   decltype(pump)::PUMP_TIME_TYPE onTimes[pump.PUMP_STEPS];
   decltype(pump)::PUMP_TIME_TYPE offTimes[pump.PUMP_STEPS];
-  onTimes[0] = millis()+PUMP_START_DELAY; // start soon
+  onTimes[0] = millis()+PUMP_START_DELAY_IN_MS; // start soon
   offTimes[0] = onTimes[0] + onForMillis[0];
   for(uint32_t k=1;k<pump.PUMP_STEPS;++k) {
     onTimes[k] = offTimes[k-1] + offForMillis[k-1];
@@ -325,35 +346,60 @@ int pumpCommand(String command) {
 
 int alarmCommand(String command)
 {
-  // alarm is set as minutesAfterStartOfDay.  To disable, simply set a value
-  // greater than number of minutes in day
-  int minutesAfterDayStart = command.toInt();
-  if( (minutesAfterDayStart < 0) || (minutesAfterDayStart > std::numeric_limits<uint16_t>::max()) ) {
-    return -1;
-  }
-  else {
-    alarm_waketime_minutes = minutesAfterDayStart;
-    return 1;
-  }
+    // alarm is set as minutesAfterStartOfDay.  To disable, simply set a value
+    // greater than number of minutes in day
+    int minutesAfterDayStart,timezoneOffset;
+    int nextOffset = wibean::utils::takeNext(command,0,minutesAfterDayStart);
+    if( nextOffset == -1 ) {
+        timezoneOffset = 0;
+    }
+    else {
+        nextOffset = wibean::utils::takeNext(command,nextOffset,timezoneOffset);
+    }
+#ifdef SERIAL_DEBUG
+    unsigned char const DEC_BASE = static_cast<unsigned char>(DEC);
+    Serial.println("alarmCommand: " + command);
+    Serial.println("nOff: " + String(nextOffset,DEC_BASE) + " mADS: " + String(minutesAfterDayStart,DEC_BASE) + " tz: " + String(timezoneOffset,DEC_BASE));
+#endif
+    if( (timezoneOffset >= -12) && (timezoneOffset <= 13) ) {
+        Time.zone(timezoneOffset);
+        // value must be stored as uint8_t so shift out of signed range by 12
+		uint8_t const valToWrite = timezoneOffset+12;
+        EEPROM.write(EEPROM_ADDRESS_TIMEZOME,valToWrite);
+    }
+    if( (minutesAfterDayStart < 0) || (minutesAfterDayStart > (std::numeric_limits<uint16_t>::max)()) ) {
+        return -1;
+    }
+    else {
+        alarm_waketime_minutes = minutesAfterDayStart;
+        return 1;
+    }
 }
 
 
 void updateStatusString() {
   // include a global declaration so that the String(value, BASE) constructor works correctly
-  unsigned char DEC_BASE = static_cast<unsigned char>(DEC);
+  unsigned char const DEC_BASE = static_cast<unsigned char>(DEC);
   String tempBuilder = "";
   int tempValue = 0;
   // status string is json with following fields
   tempBuilder = "{";
-  // is the alarm active
-  tempBuilder += "\"ala\": " + wibean::utils::boolToString(alarm_waketime_minutes < MINUTES_IN_DAY) + ",";
+  // is the alarm active (redundant)
+  //tempBuilder += "\"ala\": " + wibean::utils::boolToString(alarm_waketime_minutes < MINUTES_IN_DAY) + ",";
   // when is the alarm set for
   tempValue = alarm_waketime_minutes;
   tempBuilder += "\"alt\": " + String(tempValue,DEC_BASE) + ",";
+  // what timezone is set on the clock?
+  tempValue = getTzOffsetFromEeprom();
+  tempBuilder += "\"clktz\": " + String(tempValue,DEC_BASE) + ",";
   // is the machine brewing right now?;
   uint32_t const curTime = millis();
+  uint32_t const cMin = Time.hour()*60 + Time.minute();
+  String const cMinStr = String(cMin,DEC_BASE);
+  tempBuilder += "\"tn\": " + cMinStr + ",";
 #ifdef SERIAL_DEBUG
-  Serial.println("tNow: " + String(curTime,DEC_BASE));
+  //Serial.println("tNow: " + String(curTime,DEC_BASE));
+  //Serial.println("cMin: " + cMinStr);
 #endif
   tempBuilder += "\"b\": " + wibean::utils::boolToString(pump.isValveOpenAt(curTime)) + ",";
   // is the machine heating right now?
@@ -366,4 +412,8 @@ void updateStatusString() {
   tempBuilder += "}";
 
   tempBuilder.toCharArray(statusAsJson,STATUS_AS_JSON_LENGTH);
+};
+
+int8_t getTzOffsetFromEeprom() {
+	return static_cast<int8_t>(EEPROM.read(EEPROM_ADDRESS_TIMEZOME)) - (int8_t)12;
 };

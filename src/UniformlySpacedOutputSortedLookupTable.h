@@ -1,11 +1,11 @@
 #pragma once
 
-#include "SortedLookupTable.h"
 #include <stdint.h>
 #include <algorithm>
 
-// ASSUMES LUT IS SORTED
+#include "SortedLookupTable.h"
 
+// ASSUMES LUT IS SORTED
 template <typename VALUE_TYPE, typename INDEX_TYPE=uint32_t, typename INTERP_PREC=float, typename OUTPUT_TYPE=float>
 class UniformlySpacedOutputSortedLookupTable : public SortedLookupTable<VALUE_TYPE, INDEX_TYPE, INTERP_PREC>
 {

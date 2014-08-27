@@ -4,7 +4,7 @@
 #include "PumpProgram.h"
 
 // ************
-// INIT ODD TEST FIXTURE 
+// INIT TEST FIXTURE 
 // ***********
 class PumpProgramTest : public ::testing::Test {
 protected:

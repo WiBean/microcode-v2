@@ -5,12 +5,13 @@
 
 // **********
 // DEBUG
+#undef SERIAL_DEBUG
 //#define SERIAL_DEBUG
 // **********
 #ifdef SERIAL_DEBUG
-#include "application.h"
-unsigned char DEC_BASE = static_cast<unsigned char>(DEC);
-#include "Utilities.h"
+    #include "application.h"
+    unsigned char DEC_BASE = static_cast<unsigned char>(DEC);
+    #include "Utilities.h"
 #endif
 
 template <uint16_t N>
@@ -25,12 +26,16 @@ public:
     static const PUMP_TIME_TYPE MAX_STATE_DOUBLE = 2*MAX_STATE_DURATION_IN_MS;
 
     PumpProgram() {
-        // initialize arrays to 0
+        mOnTimes = new PUMP_TIME_TYPE [N];
+        mOffTimes = new PUMP_TIME_TYPE [N];
         for(uint16_t k=0;k<N;++k) {
-            mGuardArray[k] = 0;
             mOnTimes[k] = 0;
             mOffTimes[k] = 0;
         }
+    }
+    ~PumpProgram() {
+        delete[] mOnTimes;
+        delete[] mOffTimes;
     }
 
     static void validateProgram(uint16_t numel, uint32_t onTimes[], uint32_t offTimes[]) {
@@ -87,7 +92,7 @@ public:
 
 private:
     static void clampArray(uint16_t numel, uint32_t input[]) {
-        for (uint32_t k = 1; k<numel; ++k) {
+        for (decltype(numel) k = 1; k<numel; ++k) {
             // NOTE: this approach with the math handles rollover appropriately
             input[k] = std::min(input[k], input[k - 1] + MAX_STATE_DOUBLE);
         }
@@ -99,11 +104,9 @@ private:
     // ever increasing millis counter.  We store the previous value
     // to detect and account for overflows
     
-    // DO NOT REMOVE THE GUARD
-    // somehow the first 8 bytes of these private arrays gets trashed on each loop
-    // without the guard this array gets over-written.
-    uint32_t mGuardArray[N];
-    uint32_t mOnTimes[N];
-    uint32_t mOffTimes[N];
+    // When I used static arrays they were getting randomly over-written
+    // so I'm thinking I had a stackoverflow
+    PUMP_TIME_TYPE * mOnTimes;
+    PUMP_TIME_TYPE * mOffTimes;
 
 };
