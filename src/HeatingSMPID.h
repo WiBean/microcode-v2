@@ -50,6 +50,8 @@ public:
     bool runThyristor();
     // inform the state manager that we are pumping
     void informOfPumping(bool pumpingNow);
+    // allow outsiders to get at the PID parameters
+    PID const getPID();
 
 private:
     uint16_t computeThyristorRunInCycles(float pidOutput);

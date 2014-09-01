@@ -52,6 +52,7 @@ namespace wibean {
 	  return outMark;
 	};
     
+#ifdef SPARK
     template<>
     void printArray<float>(std::uint16_t numel, float const*const array) {
         Serial.print('[');
@@ -62,5 +63,6 @@ namespace wibean {
         Serial.print(array[numel-1],1);
         Serial.println("]");
     };
+#endif
   }
 }

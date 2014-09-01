@@ -24,7 +24,7 @@ uint16_t const Thermistor::INPUTS[INPUT_SIZE] = {139, 141, 143, 145, 146, 148, 1
 
 Thermistor::Thermistor()
 {
-	OUTPUT_MIN = INPUT_SIZE*0.5;
+	OUTPUT_MIN = (INPUT_SIZE-1)*0.5;
 	OUTPUT_TABLE_DELTA = -0.5;
 	OUTPUT_TABLE_DELTA_INTERP_PREC = -0.5;
 }

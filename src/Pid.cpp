@@ -15,6 +15,7 @@ PID::PID()
 {
     mError_integral = 0;
     mError_previous = 0;
+    mDerivative = 0;
     mError_integral_max = (std::numeric_limits<float>::max)();
     mError_integral_min = (std::numeric_limits<float>::lowest)();
     mOutput_min = (std::numeric_limits<float>::lowest)();
@@ -33,13 +34,13 @@ float PID::updateError(float error)
     //error = setpoint - measured_value
     mError_integral = (std::max)((std::min)(mError_integral + error, mError_integral_max), mError_integral_min);
     
-    float const derivative = (error - mError_previous);
+    mDerivative = (error - mError_previous);
 
-    float const unboundedOutput = mCoeff_proportional*error + mCoeff_integral*mError_integral + mCoeff_derivative*derivative;
+    float const unboundedOutput = mCoeff_proportional*error + mCoeff_integral*mError_integral + mCoeff_derivative*mDerivative;
     mOutput = (std::max)((std::min)(unboundedOutput, mOutput_max), mOutput_min);
 #if defined(SERIAL_DEBUG) && defined(SPARK)
     Serial.println(String(error,1) + "," + String(mCoeff_proportional*error,1) + ","
-    + String(mCoeff_integral*mError_integral, 1) + "," + String(mCoeff_derivative*derivative,1) + ","
+    + String(mCoeff_integral*mError_integral, 1) + "," + String(mCoeff_derivative*mDerivative,1) + ","
     + String(mOutput,1));
 #endif
     
@@ -71,7 +72,7 @@ void PID::setCoefficientDerivative(float coeff)
 {
     mCoeff_derivative = coeff;
 }
-float PID::getOutput() {
+float PID::getOutput() const {
     return mOutput;
 }
 
@@ -80,3 +81,16 @@ void PID::resetState() {
     mError_integral = 0;
     mOutput = 0;
 }
+
+float PID::getCombinedIntegralTerm() const
+{
+    return mCoeff_integral*mError_integral;
+};
+float PID::getCombinedProportionalTerm() const
+{
+    return mCoeff_proportional*mError_previous;
+};
+float PID::getCombinedDerivativeTerm() const
+{
+    return mCoeff_derivative*mDerivative;
+};

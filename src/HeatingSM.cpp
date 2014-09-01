@@ -116,8 +116,11 @@ bool HeatingSM::updateCurrentTemp(float temperatureInCelsius)
     if( mCurrentTempInCelsius < mRelayHighCutoffCelsius ) {
       // do nothing
     }
-    else {
+    else if( mCurrentTempInCelsius < mGoalTempInCelsius ) {
       mState = HEATING_PULSE;
+    }
+    else {
+        mState = COOLING;
     }
     break;
   case HEATING_PULSE:

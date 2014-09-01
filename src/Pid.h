@@ -16,7 +16,10 @@ public:
 
     // call this function regularly
     float updateError(float error);
-    float getOutput();
+    float getOutput() const;
+    float getCombinedIntegralTerm() const;
+    float getCombinedProportionalTerm() const;
+    float getCombinedDerivativeTerm() const;
 
     void setOutputBounds(float minOutput, float maxOutput);
     void setIntegralBounds(float minValue, float maxValue);
@@ -32,10 +35,10 @@ private:
     float mCoeff_derivative;
 
     float mError_previous;
-
     float mError_integral;
     float mError_integral_max;
     float mError_integral_min;
+    float mDerivative;
 
     float mOutput_min;
     float mOutput_max;

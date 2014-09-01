@@ -23,6 +23,7 @@
 // DEBUG (LEAVE THIS BELOW THE OTHER INCLUDES)
 #define SERIAL_DEBUG
 //#define HEAD_TEMP_DEBUG
+#define EXPORT_PID_VARS
 // ******
 
 #define PUMP_PIN D3
@@ -55,17 +56,16 @@ HeatingSMPID heater;
 // Thermistor LUT
 Thermistor thermistor;
 // the way spark works, we can only return data to the user via the Spark.variable command
+// Moving average temperature buffers
 double temperatureInCelsius_head = 0;
 double temperatureInCelsius_ambient = 0;
-AveragingFloatBuffer<10> headTemperatureHistory;
-AveragingFloatBuffer<10> ambientTemperatureHistory;
-
+AveragingFloatBuffer<8> headTemperatureHistory;
+AveragingFloatBuffer<8> ambientTemperatureHistory;
 // pump controller
 PumpProgram<5> pump;
 decltype(pump)::PUMP_TIME_TYPE const PUMP_START_DELAY_IN_MS = 100; //100ms delay
 // keep track of pumping state changes
 bool valveWasOpenLastCycle = false;
-
 // variables which get triggered by the hardware timers
 volatile bool runHeating = false;
 volatile bool runPump = false;
@@ -73,16 +73,22 @@ volatile bool runStatus = false;
 
 const uint16_t STATUS_AS_JSON_LENGTH = 128;
 char statusAsJson[STATUS_AS_JSON_LENGTH];
-
 // Alarm functions
 const uint32_t INACTIVITY_SHUTOFF_IN_MILLISECONDS = 45*60*1000; // 45 minutes
 const uint16_t MINUTES_IN_DAY = 60*24;
 uint32_t time_last_command = 0;
 uint16_t alarm_waketime_minutes = (std::numeric_limits<uint16_t>::max)();
-
 // EEPROM addresses
 const uint16_t EEPROM_ADDRESS_TIMEZOME = 0;
 
+#ifdef EXPORT_PID_VARS
+// Utility variables for exporting PID numbers
+double PID_propTerm = 0;
+double PID_intTerm = 0;
+double PID_derivTerm = 0;
+double PID_output = 0;
+char PID_stringOut[64];
+#endif
 
 // BEGIN CODE
 void setup() {
@@ -99,6 +105,13 @@ void setup() {
     // setup the c-str to initially be empty
     String("init").toCharArray(statusAsJson,STATUS_AS_JSON_LENGTH);
     Spark.variable("status", statusAsJson, STRING);
+    #ifdef EXPORT_PID_VARS
+    //Spark.variable("pid_propTerm", &PID_propTerm, DOUBLE);
+    //Spark.variable("pid_intTerm", &PID_intTerm, DOUBLE);
+    //Spark.variable("pid_derivTerm", &PID_derivTerm, DOUBLE);
+    //Spark.variable("pid_output", &PID_output, DOUBLE);
+    Spark.variable("pid_comb", &PID_stringOut, STRING);
+    #endif
 
     // load up values from memory
     int8_t tzOffset = getTzOffsetFromEeprom();
@@ -194,6 +207,13 @@ void interruptStatus() {
 void heatingLoop() {
     temperatureUpdate();
     heater.updateCurrentTemp(temperatureInCelsius_head);
+    #ifdef EXPORT_PID_VARS
+    PID_output = heater.getPID().getOutput();
+    PID_propTerm = heater.getPID().getCombinedProportionalTerm();
+    PID_intTerm = heater.getPID().getCombinedIntegralTerm();
+    PID_derivTerm = heater.getPID().getCombinedDerivativeTerm();
+    sprintf(PID_stringOut,"%u,%.1f,%.1f,%.1f,%.1f,%.1f",millis(),temperatureInCelsius_head,PID_output,PID_propTerm,PID_intTerm,PID_derivTerm);
+    #endif
     bool runRelay = heater.runRelay();
     // check the relay
     if( runRelay ) {
@@ -239,7 +259,7 @@ void pumpLoop() {
         digitalWrite(PUMP_PIN, PUMP_OFF_VALUE);
     }
     // only open the valve once at the beginning and close once at the end
-    bool valveOpenNow = true;//pump.isValveOpenAt(tNow);
+    bool valveOpenNow = pump.isValveOpenAt(tNow);
     if( valveOpenNow ) {
         digitalWrite(VALVE_PIN, VALVE_BREW_VALUE);
         // if transitioning from not > to pumping, notify the heater
@@ -288,59 +308,64 @@ int heatToggle(String command) {
 }
 
 int pumpCommand(String command) {
-  // pump commands come in CSV, e.g. 32,44,33,22,0,0,0,33
-  // as onFor,offFor,onFor,offFor.... up to the max limit set by PumpControl
-  // and they come in with units of 100ms per unit.
+    // pump commands come in CSV, e.g. 32,44,33,22,0,0,0,33
+    // as onFor,offFor,onFor,offFor.... up to the max limit set by PumpControl
+    // and they come in with units of 100ms per unit.
 #ifdef SERIAL_DEBUG
-  Serial.println("pumpCommand!");
+    Serial.println("pumpCommand!");
 #endif
-  // did they send any parameters?
-  if(command.length() == 0) {
-    return -1;
-  }
-  uint16_t curChar = 0;
-  uint16_t numLoop = 0;
-  decltype(pump)::PUMP_TIME_TYPE onForMillis[pump.PUMP_STEPS];
-  decltype(pump)::PUMP_TIME_TYPE offForMillis[pump.PUMP_STEPS];
-  memset(onForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
-  memset(offForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
+    // did they send any parameters?
+    if(command.length() == 0) {
+        return -1;
+    }
+    uint32_t const tNow = millis();
+    // are we pumping right now?  Only allow one program to run at a time
+    if(pump.isValveOpenAt(tNow)) {
+        return -2;
+    }
+    uint16_t curChar = 0;
+    uint16_t numLoop = 0;
+    decltype(pump)::PUMP_TIME_TYPE onForMillis[pump.PUMP_STEPS];
+    decltype(pump)::PUMP_TIME_TYPE offForMillis[pump.PUMP_STEPS];
+    memset(onForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
+    memset(offForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
 
-  while( (numLoop < pump.PUMP_STEPS) ) {
-    int value;
-    curChar = wibean::utils::takeNext(command, curChar, value) + 1;
-//#ifdef SERIAL_DEBUG
-//    Serial.print("curChar: ");
-//    Serial.println(curChar);
-//#endif
-    if( curChar == 0 ) { break; }
-    onForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
-    // 0 because we added one
-    curChar = wibean::utils::takeNext(command, curChar, value) + 1;
-//#ifdef SERIAL_DEBUG
-//    Serial.print("curChar: ");
-//    Serial.println(curChar);
-//#endif
-    if( curChar == 0 ) { break; }
-    offForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
-    ++numLoop;
-  }
-  // transfer our values from onFor/offFor, into onTimes and offTimes;
-  decltype(pump)::PUMP_TIME_TYPE onTimes[pump.PUMP_STEPS];
-  decltype(pump)::PUMP_TIME_TYPE offTimes[pump.PUMP_STEPS];
-  onTimes[0] = millis()+PUMP_START_DELAY_IN_MS; // start soon
-  offTimes[0] = onTimes[0] + onForMillis[0];
-  for(uint32_t k=1;k<pump.PUMP_STEPS;++k) {
-    onTimes[k] = offTimes[k-1] + offForMillis[k-1];
-    offTimes[k] = onTimes[k] + onForMillis[k];
-  }
+    while( (numLoop < pump.PUMP_STEPS) ) {
+        int value;
+        curChar = wibean::utils::takeNext(command, curChar, value) + 1;
+        //#ifdef SERIAL_DEBUG
+        //    Serial.print("curChar: ");
+        //    Serial.println(curChar);
+        //#endif
+        if( curChar == 0 ) { break; }
+        onForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
+        // 0 because we added one
+        curChar = wibean::utils::takeNext(command, curChar, value) + 1;
+        //#ifdef SERIAL_DEBUG
+        //    Serial.print("curChar: ");
+        //    Serial.println(curChar);
+        //#endif
+        if( curChar == 0 ) { break; }
+        offForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
+        ++numLoop;
+    }
+    // transfer our values from onFor/offFor, into onTimes and offTimes;
+    decltype(pump)::PUMP_TIME_TYPE onTimes[pump.PUMP_STEPS];
+    decltype(pump)::PUMP_TIME_TYPE offTimes[pump.PUMP_STEPS];
+    onTimes[0] = tNow+PUMP_START_DELAY_IN_MS; // start soon
+    offTimes[0] = onTimes[0] + onForMillis[0];
+    for(uint32_t k=1;k<pump.PUMP_STEPS;++k) {
+        onTimes[k] = offTimes[k-1] + offForMillis[k-1];
+        offTimes[k] = onTimes[k] + onForMillis[k];
+    }
 #ifdef SERIAL_DEBUG
-  wibean::utils::printArray(pump.PUMP_STEPS, onForMillis);
-  wibean::utils::printArray(pump.PUMP_STEPS, offForMillis);
-  wibean::utils::printArray(pump.PUMP_STEPS, onTimes);
-  wibean::utils::printArray(pump.PUMP_STEPS, offTimes);
+    wibean::utils::printArray(pump.PUMP_STEPS, onForMillis);
+    wibean::utils::printArray(pump.PUMP_STEPS, offForMillis);
+    wibean::utils::printArray(pump.PUMP_STEPS, onTimes);
+    wibean::utils::printArray(pump.PUMP_STEPS, offTimes);
 #endif
-  pump.setProgram(pump.PUMP_STEPS, onTimes, offTimes);
-  return 1;
+    pump.setProgram(pump.PUMP_STEPS, onTimes, offTimes);
+    return 1;
 };
 
 

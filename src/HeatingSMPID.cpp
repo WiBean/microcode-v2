@@ -21,18 +21,19 @@ HeatingSMPID::HeatingSMPID()
   mRunStep = 0;
 
   // initialize the PID (TUNE COEFFICIENTS HERE)
-  mPid.setCoefficientProportional(-20);
-  mPid.setCoefficientDerivative(-0.1);
-  mPid.setCoefficientIntegral(-0.1);
+  mPid.setCoefficientProportional(-17);
+  mPid.setCoefficientDerivative(-3);
+  mPid.setCoefficientIntegral(-0.2);
   // PID output ranges from 0 -> 1000 to work like a duty cycle
   mPid.setOutputBounds(0, 1000);
-  // this will be adjusted later in the setGoalTemp
-  mPid.setIntegralBounds(-100, 100);
+  // THIS IS ADJUSTED LATER in setGoalTemperature
+  mPid.setIntegralBounds(-1, 1);
 }
 
 bool HeatingSMPID::setCycleLengthInMilliseconds(uint16_t lengthInMs)
 {
   mCycleLengthInMilliseconds = static_cast<float>(lengthInMs);
+  mRunStepsInCycle = std::ceil(1000.f / mCycleLengthInMilliseconds);
 
   mCoolingBlinkWidthInCycles = std::max(
           ceilf(COOLING_BLINK_WIDTH_IN_MS/mCycleLengthInMilliseconds),
@@ -68,7 +69,7 @@ bool HeatingSMPID::setGoalTemperature(float temperatureInCelsius)
   }
   mGoalTempInCelsius = temperatureInCelsius;
   // keep the PID controller bounded
-  mPid.setIntegralBounds(-mGoalTempInCelsius, mGoalTempInCelsius);
+  mPid.setIntegralBounds(-10*mGoalTempInCelsius, 10*mGoalTempInCelsius);
 
   // if heating, go back to searching state
   if( isHeating() ) {
@@ -79,7 +80,7 @@ bool HeatingSMPID::setGoalTemperature(float temperatureInCelsius)
 
 bool HeatingSMPID::runRelay()
 {
-    return ( (mState==HEATING_PID) && (mPid.getOutput() >= 1000) );
+    return ( (mState==HEATING_PID) && (mPid.getOutput() >= 1000.f) );
 };
 
 
@@ -115,7 +116,12 @@ bool HeatingSMPID::updateCurrentTemp(float const temperatureInCelsius)
     else {
       // compute dwell interval based on temperature
       if( mRunStep == 0 ) {
-        mThyristorOnForCycles = computeThyristorRunInCycles(mPid.getOutput());
+        if( mPid.getOutput() >= 1000.f ) {
+            mThyristorOnForCycles = 0;
+        }
+        else {
+            mThyristorOnForCycles = computeThyristorRunInCycles(mPid.getOutput());
+        }
       }
       //blink on
       mThyristorOn = (mRunStep < mThyristorOnForCycles);
@@ -123,7 +129,7 @@ bool HeatingSMPID::updateCurrentTemp(float const temperatureInCelsius)
     }
     break;
   case COOLING:
-    if( mCurrentTempInCelsius < mGoalTempInCelsius ) {
+    if( (mRunStep == 0) && (mCurrentTempInCelsius < mGoalTempInCelsius) ) {
       mState = HEATING_PID;
       mRunStep = 0;
     }
@@ -187,3 +193,8 @@ void HeatingSMPID::informOfPumping(bool pumpingNow)
 HeatingSMPID::State HeatingSMPID::getState() {
   return mState;
 };
+
+PID const HeatingSMPID::getPID()
+{
+    return mPid;
+}
