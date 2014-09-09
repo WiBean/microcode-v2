@@ -16,6 +16,13 @@ Spark.function("heatToggle", heatToggle);
 
 Spark.function("pumpControl", pumpCommand);
 -------------------------------------------
+Grabs and starts the sent pumping program.
+Return codes
+
+    SUCCESS            #  1 - Program is running
+	CANCELLED          #  2 - The first value submitted was a zero, which causes immediate pump program termination.
+	INVALID_PROGRAM    # -1 - Submitted program is empty or not valid.
+	BUSY               # -2 - Another brewing program is running.  Request discarded.
 
 Spark.function("toggleAlarm", alarmCommand);
 --------------------------------------------

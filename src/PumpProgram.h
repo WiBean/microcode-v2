@@ -20,8 +20,8 @@ class PumpProgram
 public:
     typedef uint32_t PUMP_TIME_TYPE;
     static const uint16_t PUMP_STEPS = N;
-    // whats the longest time a single program can be 'on' or 'off'
-    // this should prevent anyone from pumping for days at a time
+    // What's the longest time a single program can be 'on' or 'off'?
+    // This should prevent anyone from pumping for days at a time
     static const PUMP_TIME_TYPE MAX_STATE_DURATION_IN_MS = 60000;
     static const PUMP_TIME_TYPE MAX_STATE_DOUBLE = 2*MAX_STATE_DURATION_IN_MS;
 

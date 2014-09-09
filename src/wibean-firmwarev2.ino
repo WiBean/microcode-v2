@@ -23,6 +23,7 @@
 // DEBUG (LEAVE THIS BELOW THE OTHER INCLUDES)
 #define SERIAL_DEBUG
 //#define HEAD_TEMP_DEBUG
+//#define PUMP_DEBUG
 #define EXPORT_PID_VARS
 // ******
 
@@ -118,10 +119,11 @@ void setup() {
     // bounds check
     tzOffset = std::max(std::min(tzOffset,(int8_t)13), (int8_t)-12);
     //Time.zone( tzOffset );
-    
     configurePins();
     // setup hardware timer which controls heating loop and pump loop
     setupTimers();
+	// default to HEATING state
+	heater.enableHeating(true);
 }
 void configurePins() {
     // Configure OUTPUTS
@@ -141,7 +143,7 @@ void configurePins() {
 }
 void setupTimers() {
     heater.setCycleLengthInMilliseconds(50);
-    heater.setGoalTemperature(95); // hard coded init for now
+    heater.setGoalTemperature(92); // hard coded init for now
     // called every 50ms
     heatingTimer.begin(interruptHeat, 100, hmSec);
     // called every 100ms
@@ -182,7 +184,8 @@ void loop() {
   // monitor the wake alarm
   // to disable wake-alarm simply set alarm to value > minutesInADay
   uint16_t const currentMinutes = Time.hour()*60 + Time.minute();
-  if( currentMinutes == alarm_waketime_minutes ) {
+  // we add in a second checker, so that the alarm can be turned off after activation
+  if( (currentMinutes == alarm_waketime_minutes) && (Time.second() < 5) ) {
     time_last_command = currentTime;
     heater.enableHeating(true);
   }
@@ -319,34 +322,42 @@ int pumpCommand(String command) {
         return -1;
     }
     uint32_t const tNow = millis();
-    // are we pumping right now?  Only allow one program to run at a time
-    if(pump.isValveOpenAt(tNow)) {
-        return -2;
-    }
+
     uint16_t curChar = 0;
-    uint16_t numLoop = 0;
+    int value;
+    // take the first value as a peek
+    curChar = wibean::utils::takeNext(command, curChar, value) + 1;
+    // init variables
     decltype(pump)::PUMP_TIME_TYPE onForMillis[pump.PUMP_STEPS];
     decltype(pump)::PUMP_TIME_TYPE offForMillis[pump.PUMP_STEPS];
     memset(onForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
     memset(offForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
-
-    while( (numLoop < pump.PUMP_STEPS) ) {
-        int value;
-        curChar = wibean::utils::takeNext(command, curChar, value) + 1;
-        //#ifdef SERIAL_DEBUG
-        //    Serial.print("curChar: ");
-        //    Serial.println(curChar);
-        //#endif
+    if( value == 0 ) {
+        // if the first value is 0, stop pumping in all cases
+        // We can just use these all zero buffers
+        pump.setProgram(pump.PUMP_STEPS, onForMillis, onForMillis);
+        // special return indicating pumping was cancelled.
+        return 2;
+    }
+    else if(pump.isValveOpenAt(tNow)) {
+        // are we pumping right now?  Only allow one program to run at a time
+        return -2;
+    }
+    // else continue the parse!
+    uint16_t numLoop = 0;
+    decltype(pump)::PUMP_TIME_TYPE * bufferPointer = onForMillis;
+    // REMEMBER: above we took the first one as a peek
+    while( (numLoop < (pump.PUMP_STEPS*2)) ) {
+    #ifdef PUMP_DEBUG
+        Serial.print("curChar: ");
+        Serial.println(curChar);
+    #endif
         if( curChar == 0 ) { break; }
-        onForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
-        // 0 because we added one
+        bufferPointer[numLoop] = value*100; // values come as 100ms ticks, make ours millis
+        // take the next value
         curChar = wibean::utils::takeNext(command, curChar, value) + 1;
-        //#ifdef SERIAL_DEBUG
-        //    Serial.print("curChar: ");
-        //    Serial.println(curChar);
-        //#endif
-        if( curChar == 0 ) { break; }
-        offForMillis[numLoop] = value*100; // values come as 100ms ticks, make ours millis
+        // toggle the buffer
+        bufferPointer = (bufferPointer == onForMillis) ? offForMillis : onForMillis;
         ++numLoop;
     }
     // transfer our values from onFor/offFor, into onTimes and offTimes;
