@@ -80,13 +80,15 @@ bool HeatingSMPID::setGoalTemperature(float temperatureInCelsius)
 
 bool HeatingSMPID::runRelay()
 {
-    return ( (mState==HEATING_PID) && (mPid.getOutput() >= 1000.f) );
+    return ( (mState == PUMPING) ||
+            ((mState==HEATING_PID) && (mPid.getOutput() >= 1000.f))
+           );
 };
 
 
 bool HeatingSMPID::runThyristor()
 {
-  return mThyristorOn;
+  return ((mState == PUMPING) || mThyristorOn);
 };
 
 

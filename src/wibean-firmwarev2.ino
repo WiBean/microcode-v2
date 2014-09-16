@@ -60,8 +60,8 @@ Thermistor thermistor;
 // Moving average temperature buffers
 double temperatureInCelsius_head = 0;
 double temperatureInCelsius_ambient = 0;
-AveragingFloatBuffer<8> headTemperatureHistory;
-AveragingFloatBuffer<8> ambientTemperatureHistory;
+AveragingFloatBuffer<10> headTemperatureHistory;
+AveragingFloatBuffer<10> ambientTemperatureHistory;
 // pump controller
 PumpProgram<5> pump;
 decltype(pump)::PUMP_TIME_TYPE const PUMP_START_DELAY_IN_MS = 100; //100ms delay
@@ -302,7 +302,10 @@ int heatToggle(String command) {
   if( command.length() >= 1 ) {
     // start the deadmans cutoff
     time_last_command = millis();
-    heater.enableHeating( command.charAt(0) == '1' );
+    bool enable = (command.charAt(0) == '1');
+    heater.enableHeating( enable );
+    // send an event
+    Spark.publish("wibean_v1_heatToggle", wibean::utils::boolToString(enable), 604800, PRIVATE);
     return 1;
   }
   else {
@@ -334,8 +337,14 @@ int pumpCommand(String command) {
     memset(offForMillis, 0, sizeof(decltype(pump)::PUMP_TIME_TYPE)*pump.PUMP_STEPS);
     if( value == 0 ) {
         // if the first value is 0, stop pumping in all cases
-        // We can just use these all zero buffers
+        // if we are actually brewing at this very moment, send event
+        if( pump.isValveOpenAt(tNow) ) {
+            // publish an event, TTL of 1 week
+            Spark.publish("wibean_v1_brewInProgressCanceled", "", 604800, PRIVATE);
+        }
+        // We can just use these already-made zero buffers
         pump.setProgram(pump.PUMP_STEPS, onForMillis, onForMillis);
+        
         // special return indicating pumping was cancelled.
         return 2;
     }
@@ -376,6 +385,8 @@ int pumpCommand(String command) {
     wibean::utils::printArray(pump.PUMP_STEPS, offTimes);
 #endif
     pump.setProgram(pump.PUMP_STEPS, onTimes, offTimes);
+    // publish an event, TTL of 1 week, include brew command up to 63nd character
+    Spark.publish("wibean_v1_brewStarted", command.substring(0,63), 604800, PRIVATE);
     return 1;
 };
 
