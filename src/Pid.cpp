@@ -5,7 +5,7 @@
 
 // ***********
 // DEBUG (keep this block last)
-#define SERIAL_DEBUG
+//#define SERIAL_DEBUG
 // ***********
 #if defined(SERIAL_DEBUG) && defined(SPARK)
     #include "application.h"

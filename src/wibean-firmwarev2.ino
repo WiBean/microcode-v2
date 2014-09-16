@@ -24,7 +24,8 @@
 #define SERIAL_DEBUG
 //#define HEAD_TEMP_DEBUG
 //#define PUMP_DEBUG
-#define EXPORT_PID_VARS
+//#define STATUS_DEBUG
+//#define EXPORT_PID_VARS
 // ******
 
 #define PUMP_PIN D3
@@ -82,7 +83,7 @@ uint16_t alarm_waketime_minutes = (std::numeric_limits<uint16_t>::max)();
 // EEPROM addresses
 const uint16_t EEPROM_ADDRESS_TIMEZOME = 0;
 
-#ifdef EXPORT_PID_VARS
+#if defined(EXPORT_PID_VARS)
 // Utility variables for exporting PID numbers
 double PID_propTerm = 0;
 double PID_intTerm = 0;
@@ -106,13 +107,13 @@ void setup() {
     // setup the c-str to initially be empty
     String("init").toCharArray(statusAsJson,STATUS_AS_JSON_LENGTH);
     Spark.variable("status", statusAsJson, STRING);
-    #ifdef EXPORT_PID_VARS
-    //Spark.variable("pid_propTerm", &PID_propTerm, DOUBLE);
-    //Spark.variable("pid_intTerm", &PID_intTerm, DOUBLE);
-    //Spark.variable("pid_derivTerm", &PID_derivTerm, DOUBLE);
-    //Spark.variable("pid_output", &PID_output, DOUBLE);
+#if defined(EXPORT_PID_VARS)
+    Spark.variable("pid_propTerm", &PID_propTerm, DOUBLE);
+    Spark.variable("pid_intTerm", &PID_intTerm, DOUBLE);
+    Spark.variable("pid_derivTerm", &PID_derivTerm, DOUBLE);
+    Spark.variable("pid_output", &PID_output, DOUBLE);
     Spark.variable("pid_comb", &PID_stringOut, STRING);
-    #endif
+#endif
 
     // load up values from memory
     int8_t tzOffset = getTzOffsetFromEeprom();
@@ -317,7 +318,7 @@ int pumpCommand(String command) {
     // pump commands come in CSV, e.g. 32,44,33,22,0,0,0,33
     // as onFor,offFor,onFor,offFor.... up to the max limit set by PumpControl
     // and they come in with units of 100ms per unit.
-#ifdef SERIAL_DEBUG
+#if defined(SERIAL_DEBUG) && defined(PUMP_DEBUG)
     Serial.println("pumpCommand!");
 #endif
     // did they send any parameters?
@@ -357,12 +358,13 @@ int pumpCommand(String command) {
     decltype(pump)::PUMP_TIME_TYPE * bufferPointer = onForMillis;
     // REMEMBER: above we took the first one as a peek
     while( (numLoop < (pump.PUMP_STEPS*2)) ) {
-    #ifdef PUMP_DEBUG
+    #if defined(SERIAL_DEBUG) && defined(PUMP_DEBUG)
         Serial.print("curChar: ");
         Serial.println(curChar);
     #endif
         if( curChar == 0 ) { break; }
-        bufferPointer[numLoop] = value*100; // values come as 100ms ticks, make ours millis
+        // values come as 100ms ticks, make ours millis, also, up the counter every two loops (2 buffers)
+        bufferPointer[numLoop/2] = value*100; 
         // take the next value
         curChar = wibean::utils::takeNext(command, curChar, value) + 1;
         // toggle the buffer
@@ -378,7 +380,7 @@ int pumpCommand(String command) {
         onTimes[k] = offTimes[k-1] + offForMillis[k-1];
         offTimes[k] = onTimes[k] + onForMillis[k];
     }
-#ifdef SERIAL_DEBUG
+#if defined(SERIAL_DEBUG) && defined(PUMP_DEBUG)
     wibean::utils::printArray(pump.PUMP_STEPS, onForMillis);
     wibean::utils::printArray(pump.PUMP_STEPS, offForMillis);
     wibean::utils::printArray(pump.PUMP_STEPS, onTimes);
@@ -444,9 +446,9 @@ void updateStatusString() {
   uint32_t const cMin = Time.hour()*60 + Time.minute();
   String const cMinStr = String(cMin,DEC_BASE);
   tempBuilder += "\"tn\": " + cMinStr + ",";
-#ifdef SERIAL_DEBUG
-  //Serial.println("tNow: " + String(curTime,DEC_BASE));
-  //Serial.println("cMin: " + cMinStr);
+#if defined(SERIAL_DEBUG) && defined(STATUS_DEBUG)
+  Serial.println("tNow: " + String(curTime,DEC_BASE));
+  Serial.println("cMin: " + cMinStr);
 #endif
   tempBuilder += "\"b\": " + wibean::utils::boolToString(pump.isValveOpenAt(curTime)) + ",";
   // is the machine heating right now?
