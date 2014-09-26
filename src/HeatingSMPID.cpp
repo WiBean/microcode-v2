@@ -57,7 +57,7 @@ void HeatingSMPID::enableHeating(bool enable)
 }
 
 
-bool HeatingSMPID::isHeating()
+bool HeatingSMPID::isHeating() const
 {
   return (mState != HIBERNATE);
 }
@@ -78,7 +78,7 @@ bool HeatingSMPID::setGoalTemperature(float temperatureInCelsius)
   return true;
 };
 
-bool HeatingSMPID::runRelay()
+bool HeatingSMPID::runRelay() const
 {
     return ( (mState == PUMPING) ||
             ((mState==HEATING_PID) && (mPid.getOutput() >= 1000.f))
@@ -86,7 +86,7 @@ bool HeatingSMPID::runRelay()
 };
 
 
-bool HeatingSMPID::runThyristor()
+bool HeatingSMPID::runThyristor() const
 {
   return ((mState == PUMPING) || mThyristorOn);
 };
@@ -192,11 +192,15 @@ void HeatingSMPID::informOfPumping(bool pumpingNow)
   }
 };
 
-HeatingSMPID::State HeatingSMPID::getState() {
+HeatingSMPID::State HeatingSMPID::getState() const {
   return mState;
 };
 
-PID const HeatingSMPID::getPID()
+PID const HeatingSMPID::getPID() const
 {
     return mPid;
+}
+
+float HeatingSMPID::getGoalTemperature() const {
+    return mGoalTempInCelsius;
 }

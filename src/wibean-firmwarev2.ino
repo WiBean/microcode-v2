@@ -456,7 +456,9 @@ void updateStatusString() {
   // what is the head temp right now?
   tempBuilder += "\"t_h\": " + wibean::utils::floatToString(temperatureInCelsius_head) + ",";
   // what is the ambient temp right now?
-  tempBuilder += "\"t_a\": " + wibean::utils::floatToString(temperatureInCelsius_ambient) + "";
+  tempBuilder += "\"t_a\": " + wibean::utils::floatToString(temperatureInCelsius_ambient) + ",";
+  // what is the goal temp set to
+  tempBuilder += "\"t_g\": " + wibean::utils::floatToString(heater.getGoalTemperature()) + "";
   // end JSON
   tempBuilder += "}";
 
